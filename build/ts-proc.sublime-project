@@ -1,0 +1,25 @@
+{
+    "folders":
+    [
+        {
+            "path": "../",
+            "name": "TS proc",
+            "file_exclude_patterns": ["*.cmake", "CMakeCache.txt", ".gitignore", "*.png", "*.bin", "*.out*", "install_man*", "*.log"],
+            "folder_exclude_patterns": ["CMakeFiles", "Testing", "bin", "tmp"]
+        }
+    ],
+    "settings":
+    {
+        "tab_size": 4,
+        "rulers": [80, 100]
+    },
+    "build_systems":
+    [
+        {
+            "working_dir": "${project_path:${build}}",
+            "name": "Cmake",
+            "cmd": ["cmake", ".."],
+            "cmd": ["make"]
+        }
+    ]
+}
