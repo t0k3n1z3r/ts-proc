@@ -1,4 +1,4 @@
-# PRIMITIVE MPEG-TS DEMUXER
+# PRIMITIVE MPEG-TS DEMUXER [![Build Status](https://travis-ci.org/t0k3n1z3r/ts-proc.svg?branch=master)](https://travis-ci.org/t0k3n1z3r/ts-proc)
 
 Known limitations:
 - No support for MPTS
