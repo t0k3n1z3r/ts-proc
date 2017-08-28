@@ -9,6 +9,7 @@ Just execute make. Binary called ts-proc and it takes 3 arguments on input such 
 
 ## Known limitations
 - No support for MPTS
-- No support for corrupted input
-- File input only
+- Limited support of broken input (validates only sync byte)
+- Doesn't rewind at the beginning when PAT and PMT found
+- Supports only file as an input
 - No extensive validation of TS structure (assumption that stream is OK)
