@@ -9,31 +9,137 @@
 
 #include "ts_processor.h"
 
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
+#include <iostream>
+#include <exception>
+#include <stdexcept>
+#include <iterator>
+
+// includes htobe function (could be replaced with own functions)
 #include <endian.h>
-#include <stdlib.h>
+
+#include "log.h"
+#include "es_writer.h"
+
+/**
+********************************************************************************
+* @brief        TS packet synchronization byte mask (for big-endian structure)
+********************************************************************************
+*/
+static const uint32_t SYNC_BYTE_MASK = 0xff000000;
+
+/**
+********************************************************************************
+* @brief        PUSI mask (for bit-endian structure)
+********************************************************************************
+*/
+static const uint32_t PUSI_MASK      = 0x00400000;
+
+/**
+********************************************************************************
+* @brief        TS packet ID mask (for big-endian structure)
+********************************************************************************
+*/
+static const uint32_t PID_MASK       = 0x001fff00;
+
+/**
+********************************************************************************
+* @brief        Adaptation field control mask (for big-endian structure)
+********************************************************************************
+*/
+static const uint32_t AFC_MASK       = 0x00000030;
+
+/**
+********************************************************************************
+* @brief        Macro which validates TS Packet header (header value must be
+*               in big-endian structure)
+* @return       true in case TS packet is valid, false otherwise
+********************************************************************************
+*/
+static inline bool IS_PACKET_VALID(uint32_t header)
+{
+    return ((header & SYNC_BYTE_MASK) >> 24 == 0x47);
+}
+
+/**
+********************************************************************************
+* @brief        Size of TS packet header
+********************************************************************************
+*/
+static const uint32_t TS_PACKET_HEADER = 4;
+
+/**
+********************************************************************************
+* @brief        Size of TS packet payload (including adaptation field)
+********************************************************************************
+*/
+static const uint32_t TS_PACKET_PAYLOAD = 184;
+
+/**
+********************************************************************************
+* @brief        Size of TS packet (header + payload)
+********************************************************************************
+*/
+static const uint32_t TS_PACKET_SIZE = TS_PACKET_HEADER + TS_PACKET_PAYLOAD;
+
+/**
+********************************************************************************
+* @struct       ts_packet
+* @brief        Definition of MPEG-TS packet structure
+********************************************************************************
+*/
+struct ts_packet
+{
+    /**
+    ****************************************************************************
+    * @brief    TS packet header
+    * @note     Structure of a header (Big Endian)
+    ****************************************************************************
+    */
+    uint32_t header;
+
+    /**
+    ****************************************************************************
+    * @brief    Payload of TS packet, including Adaptation field
+    ****************************************************************************
+    */
+    uint8_t  payload[TS_PACKET_PAYLOAD];
+};
 
 /*
 ********************************************************************************
 *
 ********************************************************************************
 */
-TSProcessor::TSProcessor(const char* const input, const char* const video,
-        const char* const audio)
-    : m_input_filename(input)
-    , m_video_filename(video)
-    , m_audio_filename(audio)
-    , m_input_file(NULL)
-    , m_video_file(NULL)
-    , m_audio_file(NULL)
+TSProcessor::TSProcessor(const char* const input)
+    : m_input_file(input, std::ifstream::binary)
     , m_input_filesize(0)
     , m_pmt_pid(0x1fff)
     , m_video_pid(0x1fff)
     , m_audio_pid(0x1fff)
 {
+    if (!m_input_file) throw std::runtime_error("Can't open input file");
 
+    m_input_file.seekg(0, m_input_file.end);
+    m_input_filesize = m_input_file.tellg();
+    m_input_file.seekg(0, m_input_file.beg);
+
+    /**
+    ************************************************************************
+    * @note     At this moment all packets will be ignored except PID 0.
+    *           After this function is finished execution PMT PID is known
+    ************************************************************************
+    */
+    if (!process_pat()) throw std::runtime_error("Can't find PAT");
+
+    /**
+    ************************************************************************
+    * @note     At this moment all packets will be ignored expept PID
+    *           equals to PMT (found in PAT). This function has to
+    *           find Video PID and audio PID and initialize corresponding
+    *           class members
+    ************************************************************************
+    */
+    if (!process_pmt()) throw std::runtime_error("Can't find PMT");
 }
 
 /*
@@ -43,23 +149,7 @@ TSProcessor::TSProcessor(const char* const input, const char* const video,
 */
 TSProcessor::~TSProcessor()
 {
-    if (NULL != m_input_file)
-    {
-        fclose(m_input_file);
-        m_input_file = NULL;
-    }
-
-    if (NULL != m_video_file)
-    {
-        fclose(m_video_file);
-        m_video_file = NULL;
-    }
-
-    if (NULL != m_audio_file)
-    {
-        fclose(m_audio_file);
-        m_audio_file = NULL;
-    }
+    m_input_file.close();
 }
 
 /*
@@ -67,75 +157,9 @@ TSProcessor::~TSProcessor()
 *
 ********************************************************************************
 */
-STATUS TSProcessor::init()
+bool TSProcessor::process_pat()
 {
-    STATUS result = STATUS_FAIL;
-
-    do
-    {
-        m_input_file = fopen(m_input_filename.c_str(), "rb");
-        if (NULL == m_input_file)
-        {
-            fprintf(stderr, "Can't open input file (%s). Error: %s\n",
-                m_input_filename.c_str(), strerror(errno));
-            break;
-        }
-
-        m_video_file = fopen(m_video_filename.c_str(), "wb");
-        if (NULL == m_video_file)
-        {
-            fprintf(stderr,
-                "Can't open/create video stream file (%s). Error: %s\n",
-                m_video_filename.c_str(), strerror(errno));
-            break;
-        }
-
-        m_audio_file = fopen(m_audio_filename.c_str(), "wb");
-        if (NULL == m_audio_file)
-        {
-            fprintf(stderr,
-                "Can't open/create audio stream file (%s). Error: %s\n",
-                m_video_filename.c_str(), strerror(errno));
-            break;
-        }
-        
-        int r = fseek(m_input_file, 0, SEEK_END);
-        if (0 != r)
-        {
-            result = STATUS_FAIL;
-            fprintf(stderr, "Can't seek to the end of file\n");
-            break;
-        }
-
-        long size = ftell(m_input_file);
-        if (size < 0)
-        {
-            fprintf(stderr, "Something went wrong during ftell()\n");
-            break;
-        }
-        m_input_filesize = size;
-        rewind(m_input_file);
-        fprintf(stdout, "TSProcessor initialized:\n"
-                        "\tInput file: %s (size: %lu bytes)\n"
-                        "\tVideo file: %s\n"
-                        "\tAudio file: %s\n",
-                        m_input_filename.c_str(), m_input_filesize,
-                        m_video_filename.c_str(), m_audio_filename.c_str());
-        result = STATUS_OK;
-
-    } while(0);
-
-    return result;
-}
-
-/*
-********************************************************************************
-*
-********************************************************************************
-*/
-STATUS TSProcessor::process_pat()
-{
-    STATUS result = STATUS_FAIL;
+    bool result = false;
 
     uint16_t stream_id  = 0;
     uint16_t prog_id    = 0;
@@ -144,7 +168,7 @@ STATUS TSProcessor::process_pat()
     {
         struct ts_packet packet;
         result = read_packet(packet);
-        if (0 != result)
+        if (!result)
         {
             break;
         }
@@ -206,11 +230,9 @@ STATUS TSProcessor::process_pat()
         */
         if (prog_num != 1)
         {
-            result = STATUS_FAIL;
-            fprintf(stderr, "Number of programs different than 1 (%d)\n",
-                prog_num);
-            fprintf(stderr, "MPTS (Multiple Program Transport Stream) is not "
-                "supported by this implementation\n");
+            result = false;
+            log::error() << "Number of programs different than 1: " << prog_num;
+            log::error() << "MPTS is not supported by this implementaiton";
             break;
         }
 
@@ -220,16 +242,13 @@ STATUS TSProcessor::process_pat()
         m_pmt_pid = htobe16(*(uint16_t*)&packet.payload[pi]) & 0x1fff;
         pi += 2;
 
-        result = STATUS_OK;
-
-        fprintf(stdout, "PAT found:\n");
-        fprintf(stdout, "\tMPEG-TS Stream ID: %d  (0x%x)\n", stream_id,
-            stream_id);
-        fprintf(stdout, "\tProgram ID: %d (0x%x)\n", prog_id, prog_id);
-        fprintf(stdout, "\tPMT PID: %d (0x%x)\n", m_pmt_pid, m_pmt_pid);
+        log::info() << "MPEG-TS Stream ID: " << stream_id;
+        log::info() << "Program ID:" << prog_id;
+        log::info() << "PMT PID: " << m_pmt_pid;
+        result = true;
         break;
 
-    } while((size_t)ftell(m_input_file) < m_input_filesize);
+    } while((size_t)m_input_file.tellg() < m_input_filesize);
 
     return result;
 }
@@ -239,15 +258,15 @@ STATUS TSProcessor::process_pat()
 *
 ********************************************************************************
 */
-STATUS TSProcessor::process_pmt()
+bool TSProcessor::process_pmt()
 {
-    STATUS result = STATUS_FAIL;
+    bool result = false;
 
     do
     {
         struct ts_packet packet;
         result = read_packet(packet);
-        if (0 != result)
+        if (!result)
         {
             break;
         }
@@ -327,17 +346,15 @@ STATUS TSProcessor::process_pmt()
             save_pid(el, st);
         }
 
-        result = STATUS_OK;
+        result = true;
 
-        fprintf(stdout, "PMT found:\n");
-        fprintf(stdout, "\tProgram number: %d (0x%x)\n", prog_num, prog_num);
-        fprintf(stdout, "\tVideo PID: %d (0x%x)\n", m_video_pid, m_video_pid);
-        fprintf(stdout, "\tAudio PID: %d (0x%x)\n", m_audio_pid, m_audio_pid);
-        fprintf(stdout, "\tPCR PID:   %d (0x%x)\n", pcr_pid, pcr_pid);
-
+        log::info() << "Program number: " << prog_num;
+        log::info() << "Video PID: " << m_video_pid;
+        log::info() << "Audio PID: " << m_audio_pid;
+        log::info() << "PCR PID: " << pcr_pid;
         break;
 
-    } while((size_t)ftell(m_input_file) < m_input_filesize);
+    } while((size_t)m_input_file.tellg() < m_input_filesize);
 
     return result;
 }
@@ -347,53 +364,29 @@ STATUS TSProcessor::process_pmt()
 *
 ********************************************************************************
 */
-STATUS TSProcessor::demux()
+void TSProcessor::demux(const char* const video, const char* const audio)
 {
-    STATUS result = STATUS_FAIL;
+    /**
+    ****************************************************************************
+    * @note     Video and Audio stream might be replaced with whatsever
+    *           implementation of payload handler
+    ****************************************************************************
+    */
+    VideoESWriter v(video);
+    AudioESWriter a(audio);
 
-    do
-    {
-        /**
-        ************************************************************************
-        * @note     At this moment all packets will be ignored except PID 0.
-        *           After this function is finished execution PMT PID is known
-        ************************************************************************
-        */
-        result = process_pat();
-        if (STATUS_OK != result)
-        {
-            break;
-        }
 
-        /**
-        ************************************************************************
-        * @note     At this moment all packets will be ignored expept PID
-        *           equals to PMT (found in PAT). This function has to
-        *           find Video PID and audio PID and initialize corresponding
-        *           class members
-        ************************************************************************
-        */
-        result = process_pmt();
-        if (STATUS_OK != result)
-        {
-            break;
-        }
+    if (!video) throw std::runtime_error("Can't open output file for video ES");
+    if (!audio) throw std::runtime_error("Can't open output file for audio ES");
 
-        /**
-        ************************************************************************
-        * @note     At this moment all packets will be ignored except video and
-        *           audio PID
-        ************************************************************************
-        */
-        result = process_file();
-        if (STATUS_OK != result)
-        {
-            break;
-        }
-
-    } while(0);
-
-    return result;
+   /**
+    ************************************************************************
+    * @note     At this moment all packets will be ignored except video and
+    *           audio PID
+    ************************************************************************
+    */
+    if (!process_file(v, a))
+        throw std::runtime_error("Can't process file");
 }
 
 /*
@@ -401,37 +394,34 @@ STATUS TSProcessor::demux()
 *
 ********************************************************************************
 */
-STATUS TSProcessor::read_packet(struct ts_packet& packet)
+bool TSProcessor::read_packet(struct ts_packet& packet)
 {
-    STATUS result = STATUS_FAIL;
+    bool result = false;
 
     do
     {
-        size_t read_bytes = fread(&packet.header, 1, TS_PACKET_HEADER,
-            m_input_file);
-        if (TS_PACKET_HEADER != read_bytes)
+        m_input_file.read((char*)&packet.header, TS_PACKET_HEADER);
+        if (!m_input_file)
         {
-            fprintf(stderr, "Can't read TS packet header from %s file!\n",
-                m_input_filename.c_str());
+            log::error() << "Can't read TS packet header input file";
             break;
         }
 
         packet.header = htobe32(packet.header);
         if (!IS_PACKET_VALID(packet.header))
         {
-            fprintf(stderr, "Sync byte of TS packet has wrong value\n");
+            log::error() << "Sync byte of TS packet has wrong value";
             break;
         }
 
-        read_bytes = fread(&packet.payload, 1, TS_PACKET_PAYLOAD, m_input_file);
-        if (TS_PACKET_PAYLOAD != read_bytes)
+        m_input_file.read((char*)packet.payload, TS_PACKET_PAYLOAD);
+        if (!m_input_file)
         {
-            fprintf(stderr, "Can't read TS packet payload from %s file!",
-                m_input_filename.c_str());
+            log::error() << "Can't read TS packet payload input file";
             break;
         }
 
-        result = STATUS_OK;
+        result = true;
     } while(0);
 
     return result;
@@ -442,15 +432,15 @@ STATUS TSProcessor::read_packet(struct ts_packet& packet)
 *
 ********************************************************************************
 */
-STATUS TSProcessor::process_file()
+bool TSProcessor::process_file(VideoESWriter& v, AudioESWriter& a)
 {
-    STATUS result = STATUS_OK;
-    
+    bool result = true;
+
     do
     {
         struct ts_packet packet;
         result = read_packet(packet);
-        if (0 != result)
+        if (!result)
         {
             break;
         }
@@ -488,18 +478,16 @@ STATUS TSProcessor::process_file()
             pi += 3 + opes;
         }
 
-        FILE* f = (pid == m_video_pid) ? m_video_file : m_audio_file;
-        size_t w_bytes = fwrite(&packet.payload[pi], 1, TS_PACKET_PAYLOAD - pi,
-            f);
-        if (TS_PACKET_PAYLOAD - pi != w_bytes)
+        if (pid == m_video_pid)
         {
-            result = STATUS_FAIL;
-            fprintf(stderr, "Can't write to (%s) file (%lu) bytes!\n",
-                "test", TS_PACKET_PAYLOAD - pi);
-            break;
+            v.write(&packet.payload[pi], TS_PACKET_PAYLOAD - pi);
+        }
+        else
+        {
+            a.write(&packet.payload[pi], TS_PACKET_PAYLOAD - pi);
         }
 
-    } while((size_t)ftell(m_input_file) < m_input_filesize);
+    } while((size_t)m_input_file.tellg() < m_input_filesize);
 
     return result;
 }

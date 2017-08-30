@@ -7,44 +7,38 @@
 ********************************************************************************
 */
 
-#include <stdio.h>
-#include <stdint.h>
-#include <endian.h>
+#include <memory>
 
 #include "ts_processor.h"
+#include "log.h"
 
 int main(int argc, char* argv[])
 {
-    int result = 1;
+    int result = 0;
+    std::unique_ptr<TSProcessor> proc;
 
-    do
+    log::set(log::LEVEL::debug);
+    if (argc != 4)
     {
-        if (argc != 4)
-        {
-            fprintf(stderr,
-                "Usage: %s <input_ts> <output_video> <output_audio>\n",
-                argv[0]);
-            break;
-        }
 
-        TSProcessor proc(argv[1], argv[2], argv[3]);
+        log::error() << "Usage: " << argv[0]
+            << "<input_ts> <output_video> <output_audio>";
+        return 1;
+    }
 
-        result = proc.init();
-        if (STATUS_OK != result)
-        {
-            break;
-        }
+    try
+    {
+        proc = std::unique_ptr<TSProcessor>(new TSProcessor(argv[1]));
+        proc->demux(argv[2], argv[3]);
+        result = 0;
+    }
+    catch(std::runtime_error& r)
+    {
+        log::error() << r.what();
+        result = 1;
+    }
 
-        result = proc.demux();
-        if (STATUS_OK != result)
-        {
-            break;
-        }
-
-    } while(0);
-    
-    fprintf(stdout, "Processing of MPEG-TS file (%s) done with result: %s\n",
-        argv[1], (STATUS_OK == result) ? "success" : "fail");
+    log::info() << argv[0] << " finished with " << result << " result";
 
     return result;
 }

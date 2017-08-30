@@ -10,117 +10,21 @@
 #ifndef _TS_PROCESSOR_H_
 #define _TS_PROCESSOR_H_
 
-#include <string>
-#include <stdio.h>
-#include <stdint.h>
+#include <fstream>
 
-/**
-********************************************************************************
-* @enum         STATUS
-* @brief        Error codes might be returned
-********************************************************************************
-*/
-typedef enum
-{
-    STATUS_OK   = 0,
-    STATUS_FAIL = 1
-} STATUS;
-
-/**
-********************************************************************************
-* @def          SYNC_BYTE_MASK
-* @brief        TS packet synchronization byte mask (for big-endian structure)
-********************************************************************************
-*/
-#define SYNC_BYTE_MASK  0xff000000
-
-/**
-********************************************************************************
-* @def          IS_PACKET_VALID
-* @brief        Macro which validates TS Packet header (header value must be
-*               in big-endian structure)
-********************************************************************************
-*/
-#define IS_PACKET_VALID(header) (((header & SYNC_BYTE_MASK) >> 24) == 0x47)
-
-/**
-********************************************************************************
-* @def          PUSI_MASK
-* @brief        PUSI mask (for bit-endian structure)
-********************************************************************************
-*/
-#define PUSI_MASK       0x00400000
-
-/**
-********************************************************************************
-* @def          PID_MASK
-* @brief        TS packet ID mask (for big-endian structure)
-********************************************************************************
-*/
-#define PID_MASK        0x001fff00
-
-/**
-********************************************************************************
-* @def          AFC_MASK
-* @brief        Adaptation field control mask (for big-endian structure)
-********************************************************************************
-*/
-#define AFC_MASK        0x00000030
-
-/**
-********************************************************************************
-* @def          TS_PACKET_HEADER
-* @brief        Size of TS packet header
-********************************************************************************
-*/
-#define TS_PACKET_HEADER    4
-
-/**
-********************************************************************************
-* @def          TS_PACKET_PAYLOAD
-* @brief        Size of TS packet payload (including adaptation field)
-********************************************************************************
-*/
-#define TS_PACKET_PAYLOAD   184
-
-/**
-********************************************************************************
-* @def          TS_PACKET_SIZE
-* @brief        Size of TS packet (header + payload)
-********************************************************************************
-*/
-#define TS_PACKET_SIZE      (TS_PACKET_HEADER + TS_PACKET_PAYLOAD)
-
-/**
-********************************************************************************
-* @struct       ts_packet
-* @brief        Definition of MPEG-TS packet structure
-********************************************************************************
-*/
-struct ts_packet
-{
-    /**
-    ****************************************************************************
-    * @brief    TS packet header
-    * @note     Structure of a header (Big Endian):
-    ****************************************************************************
-    */
-    uint32_t header;
-
-    /**
-    ****************************************************************************
-    * @brief    Payload of TS packet, including Adaptation field
-    ****************************************************************************
-    */
-    uint8_t  payload[184];
-
-};
+// Forward declaration of classes
+class VideoESWriter;
+class AudioESWriter;
 
 /**
 ********************************************************************************
 * @class        TSProcessor
 * @brief        Declaration of MPEG-TS file procesisng
-* @note         This class has initialization method in order to
+* @warning      In order to follow RAII:
+*               (http://en.cppreference.com/w/cpp/language/raii), constructor
+*               throws exception in case input file can't be opened or PAT and
+*               PMT can't be found:
+*               (https://en.wikipedia.org/wiki/Program-specific_information)
 ********************************************************************************
 */
 class TSProcessor
@@ -133,33 +37,21 @@ public:
     * @param    [in] input  MPEG-TS file name
     * @param    [in] video  Video elementary stream file name
     * @param    [in] audio  Audio elementary stream file name
+    * @warning  throws runtime_errror exception in case if object
     ****************************************************************************
     */
-    TSProcessor(const char* const input, const char* const video,
-        const char* const audio);
-    
+    TSProcessor(const char* const input);
     ~TSProcessor();
 
     /**
     ****************************************************************************
-    * @brief    Does initialization of the object by opening all files given
-    *           in constructor
-    * @return   STATUS_OK on success, STATUS_FAIL - otherwise
+    * @brief    Does demultiplexing of the SPTS by putting video packets to
+    *           video file and audio packets to audio file
+    * @warning  Throws exception in case of error
+    * @return   void
     ****************************************************************************
     */
-    STATUS init(void);
-
-    /**
-    ****************************************************************************
-    * @brief    Performs demultiplex of MPEG-TS file. This function has 3 main
-    *           stages: 1 - find PAT in the stream, 2 - find PMT in the stream,
-    *           3 - Process file ignoring all PIDs different than video
-    *           and audio found in PMT. All packets except video and audio will
-    *           be ignored.
-    * @return   STATUS_OK on success, STATUS_FAIL - otherwise
-    ****************************************************************************
-    */
-    STATUS demux(void);
+    void demux(const char* const video, const char* const audio);
 
 private:
     /**
@@ -170,7 +62,7 @@ private:
     * @return   STATUS_OK on success, STATUS_FAIL - otherwise
     ****************************************************************************
     */
-    STATUS process_file(void);
+    bool process_file(VideoESWriter& v, AudioESWriter& a);
 
     /**
     ****************************************************************************
@@ -179,7 +71,7 @@ private:
     * @return   STATUS_OK on success, STATUS_FAIL - otherwise
     ****************************************************************************
     */
-    STATUS read_packet(struct ts_packet& packet);
+    bool read_packet(struct ts_packet& packet);
 
     /**
     ****************************************************************************
@@ -192,7 +84,7 @@ private:
     *           STATUS_FAIL - otherwise
     ****************************************************************************
     */
-    STATUS process_pat(void);
+    bool process_pat(void);
 
     /**
     ****************************************************************************
@@ -206,7 +98,7 @@ private:
     *           found in PAT), STATUS_FAIL - otherwise
     ****************************************************************************
     */
-    STATUS process_pmt(void);
+    bool process_pmt(void);
 
     /**
     ****************************************************************************
@@ -220,24 +112,16 @@ private:
     */
     void save_pid(uint16_t pid, int type);
 
-private:    // Blocked implementations
-    TSProcessor();
-    TSProcessor(const TSProcessor& r);
-    TSProcessor& operator= (const TSProcessor&);
+private:
+    TSProcessor()                               = delete;
+    TSProcessor(const TSProcessor& r)           = delete;
+    TSProcessor& operator= (const TSProcessor&) = delete;
 
 private:
-    std::string     m_input_filename;   ///< Input MPEG-TS file name
-    std::string     m_video_filename;   ///< Output video ES file name
-    std::string     m_audio_filename;   ///< Output audio ES file name
-
-    FILE*           m_input_file;       ///< MPEG-TS file descriptor
-    FILE*           m_video_file;       ///< Video ES file descriptor
-    FILE*           m_audio_file;       ///< Audio ES file descriptor
-
+    std::ifstream   m_input_file;       ///< MPEG-TS file stream
     size_t          m_input_filesize;   ///< MPEG-TS file size
 
     uint16_t        m_pmt_pid;          ///< PID TS packet which contains PMT
-
     uint16_t        m_video_pid;        ///< Video PID
     uint16_t        m_audio_pid;        ///< Audio PID
 };
