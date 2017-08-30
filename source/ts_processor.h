@@ -35,8 +35,6 @@ public:
     * @brief    The only allowed constructor for this class. All other
     *           contructors are blocked.
     * @param    [in] input  MPEG-TS file name
-    * @param    [in] video  Video elementary stream file name
-    * @param    [in] audio  Audio elementary stream file name
     * @warning  throws runtime_errror exception in case if object
     ****************************************************************************
     */
@@ -47,6 +45,8 @@ public:
     ****************************************************************************
     * @brief    Does demultiplexing of the SPTS by putting video packets to
     *           video file and audio packets to audio file
+    * @param    [in] video  Filename where video ES shall be stored
+    * @param    [in] audio  Filename where audio ES shall be stored
     * @warning  Throws exception in case of error
     * @return   void
     ****************************************************************************
@@ -59,7 +59,7 @@ private:
     * @brie     Process MPEG-TS file after video PID and audio PID is known
     * @warning  All packets with PID different than m_video_pid and m_audio_pid
     *           will be ignored by this function
-    * @return   STATUS_OK on success, STATUS_FAIL - otherwise
+    * @return   true on success, false - otherwise
     ****************************************************************************
     */
     bool process_file(VideoESWriter& v, AudioESWriter& a);
@@ -68,7 +68,7 @@ private:
     ****************************************************************************
     * @brief    Read single TS packet from input file at current position
     * @param    [out] packet    Packet will be returned by the function
-    * @return   STATUS_OK on success, STATUS_FAIL - otherwise
+    * @return   true on success, false - otherwise
     ****************************************************************************
     */
     bool read_packet(struct ts_packet& packet);
@@ -80,8 +80,8 @@ private:
     *           in the stream and searches for packet with PID 0 and skips all
     *           other packets. This function MUST initialize m_pmt_pid with 
     *           PID found in PAT
-    * @return   STATUS_OK on sucees (m_pmt_pid set to value found in PAT),
-    *           STATUS_FAIL - otherwise
+    * @return   true on sucees (m_pmt_pid set to value found in PAT),
+    *           false - otherwise
     ****************************************************************************
     */
     bool process_pat(void);
@@ -94,8 +94,8 @@ private:
     *           m_pmt_pid and skips all other packets.
     * @warning  This function must be called only in case if process_pat was
     *           finished successfully and PMT PID was found
-    * @return   STATUS_OK on sucees (m_video_pid and m_audio_pid set to value
-    *           found in PAT), STATUS_FAIL - otherwise
+    * @return   true on sucees (m_video_pid and m_audio_pid set to value
+    *           found in PAT), false - otherwise
     ****************************************************************************
     */
     bool process_pmt(void);
