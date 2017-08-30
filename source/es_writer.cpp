@@ -15,7 +15,7 @@
 ********************************************************************************
 */
 ESWriter::ESWriter(const char* const filename)
-	: m_file(filename, std::ofstream::binary)
+    : m_file(filename, std::ofstream::binary)
 {
 
 }
@@ -27,7 +27,7 @@ ESWriter::ESWriter(const char* const filename)
 */
 ESWriter::~ESWriter()
 {
-	m_file.close();
+    m_file.close();
 }
 
 /*
@@ -36,7 +36,7 @@ ESWriter::~ESWriter()
 ********************************************************************************
 */
 VideoESWriter::VideoESWriter(const char* const filename)
-	: ESWriter(filename)
+    : ESWriter(filename)
 {
 
 }
@@ -58,7 +58,7 @@ VideoESWriter::~VideoESWriter()
 */
 void VideoESWriter::write(const uint8_t* const buffer, size_t size)
 {
-	m_file.write((char*)buffer, size);
+    m_file.write((char*)buffer, size);
 }
 
 /*
@@ -67,7 +67,7 @@ void VideoESWriter::write(const uint8_t* const buffer, size_t size)
 ********************************************************************************
 */
 AudioESWriter::AudioESWriter(const char* const filename)
-	: ESWriter(filename)
+    : ESWriter(filename)
 {
 
 }
@@ -89,5 +89,5 @@ AudioESWriter::~AudioESWriter()
 */
 void AudioESWriter::write(const uint8_t* const buffer, size_t size)
 {
-	m_file.write((char*)buffer, size);
+    m_file.write((char*)buffer, size);
 }
