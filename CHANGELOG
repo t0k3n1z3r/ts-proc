@@ -1,0 +1,15 @@
+Entries are sorted chronologically from oldest to youngest within each release,
+releases are sorted from youngest to oldest.
+
+version 0.0.4
+- Added ARGP implementation for command line argument parsing
+
+version 0.0.3
+- Recovered original simple implementation
+- Removed C++11
+
+version 0.0.2
+- Added C++11 features
+
+version 0.0.1
+- Initial implementation
