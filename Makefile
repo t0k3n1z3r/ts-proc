@@ -1,9 +1,12 @@
 
-CC=g++
-CXXFLAGS=-Wall -Wextra
+CC = g++
+CXXFLAGS = -Wall -Wextra -Werror
+
+VERSTR := $(shell cat VERSION)
 
 ts-proc:
-	$(CC) -o ts-proc source/main.cpp source/ts_processor.cpp $(CXXFLAGS)
+	echo $(VERSTR)
+	$(CC) -o ts-proc source/main.cpp source/ts_processor.cpp $(CXXFLAGS) -DVERSION='"$(VERSTR)"'
 
 .PHONY: clean
 
